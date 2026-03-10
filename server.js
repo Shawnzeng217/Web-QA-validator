@@ -125,11 +125,18 @@ app.post('/api/extract', async (req, res) => {
                 while (Date.now() - start < 100);
             }, true);
 
-            // Deep Proxy for digitalData
-            const createProxy = (obj, path) => {
+            // Top-level Recursive Proxy to handle object replacements
+            const wrapWithProxy = (obj, path) => {
+                if (!obj || typeof obj !== 'object') return obj;
                 return new Proxy(obj, {
                     set(target, prop, value) {
+                        // If we are setting a sub-object, wrap it too
+                        if (value && typeof value === 'object') {
+                            value = wrapWithProxy(value, `${path}.${prop}`);
+                        }
                         target[prop] = value;
+
+                        // Critical check: if clickID is populated anywhere, capture it
                         if (prop === 'clickID' && value !== "") {
                             console.log(`[Proxy] CRITICAL CAPTURE! clickID set to: ${value}`);
                             doCapture('proxy_success');
@@ -141,19 +148,27 @@ app.post('/api/extract', async (req, res) => {
 
             let wrapped = false;
             const wrapper = setInterval(() => {
-                if (window.digitalData && !wrapped) {
-                    if (window.digitalData.click) {
-                        window.digitalData.click = createProxy(window.digitalData.click, 'click');
-                        wrapped = true;
-                        console.log("[Browser] digitalData.click Proxy attached.");
-                    } else if (window.digitalData) {
-                        // If click doesn't exist, create it as a proxy
-                        window.digitalData.click = createProxy({}, 'click');
-                        wrapped = true;
-                        console.log("[Browser] digitalData.click Proxy initialized.");
-                    }
+                if (window.digitalData) {
+                    // Wrap the root digitalData object
+                    window.digitalData = wrapWithProxy(window.digitalData, 'root');
+                    wrapped = true;
+                    console.log("[Browser] digitalData Root Proxy attached.");
+                    clearInterval(wrapper);
                 }
             }, 50);
+
+            // Async Waiter in Click Event (Simulate Manual Breakpoint Delay)
+            window.addEventListener('click', async () => {
+                console.log("[Browser] Click detected. Polling for digitalData update...");
+                for (let i = 0; i < 20; i++) { // Max 1 second wait
+                    if (window.digitalData && window.digitalData.click && window.digitalData.click.clickID) {
+                        console.log("[Browser] Data found during click-wait!");
+                        doCapture('click_async_wait');
+                        break;
+                    }
+                    await new Promise(r => setTimeout(r, 50));
+                }
+            }, true);
 
             // Fallback listeners
             window.addEventListener('mousedown', () => doCapture('mousedown_bubble'), false);
@@ -231,21 +246,21 @@ app.post('/api/extract', async (req, res) => {
         let finalData = null;
         if (isClickTest) {
             // For click tests, we STICK with the snapshot taken during the interaction.
-            // This guarantees we don't get 'leaked' data from the destination page.
+            // This is the "Software Breakpoint" result.
             if (capturedData && capturedData.click && capturedData.click.clickID) {
                 finalData = capturedData;
                 console.log(`[Extraction] SUCCESS: Captured transient clickID "${capturedData.click.clickID}"`);
             } else if (capturedData) {
-                // Return the best snapshot we got even if clickID is missing
                 finalData = capturedData;
                 console.log(`[Extraction] WARNING: Bridge captured data but clickID is empty.`);
             } else {
-                // Absolute fallback
+                // Fallback to current browser state
                 finalData = await page.evaluate(() => window.digitalData || null);
             }
         } else {
-            // Standard Page Load test
+            // Standard Page Load test: Just grab what's there after navigation/actions
             finalData = await page.evaluate(() => window.digitalData || null);
+            console.log(`[Extraction] Page Load data retrieved.`);
         }
 
         if (!finalData) {
