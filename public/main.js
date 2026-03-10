@@ -150,10 +150,12 @@ elements.refSelect.addEventListener('change', (e) => {
     if (selectedCase) {
         elements.reqPreview.style.display = 'block';
         elements.reqPreview.innerHTML = `
-            <strong>Location:</strong> ${selectedCase.location || 'N/A'}<br/>
-            <strong>Requirement:</strong> ${selectedCase.requirement || 'N/A'}<br/>
-            <strong style="color: var(--accent-1); display:block; margin-top:8px;">Expected Data Layer Preview:</strong>
-            <pre style="margin-top: 4px; font-size: 0.8rem; overflow-x: auto; max-height: 100px;">${selectedCase.expectedDataLayer}</pre>
+            <div style="margin-bottom: 8px;">
+                <strong>Location:</strong> ${selectedCase.location || 'N/A'}<br/>
+                <strong>Requirement:</strong> ${selectedCase.requirement || 'N/A'}
+            </div>
+            <strong style="color: var(--primary-blue); display:block; margin-top:12px; margin-bottom: 4px; font-size: 0.85rem;">Expected Data Layer Spec:</strong>
+            <div class="json-block" style="font-size: 0.8rem; padding: 0.75rem;">${selectedCase.expectedDataLayer}</div>
         `;
         elements.step3.style.opacity = '1';
         elements.step3.style.pointerEvents = 'auto';
@@ -185,6 +187,22 @@ elements.validateBtn.addEventListener('click', async () => {
     elements.validateBtn.disabled = true;
     elements.loadingOverlay.style.display = 'block';
 
+    const statusText = elements.loadingOverlay.querySelector('p');
+    const stages = [
+        '🚀 Initializing Hilton Validation Agent...',
+        '🌐 Connecting to Target Environment...',
+        '🧠 Analyzing Page Structure...',
+        '🔍 Extracting DigitalData Objects...',
+        '📊 Comparing against Spec Requirements...'
+    ];
+
+    let stageIdx = 0;
+    const statusInterval = setInterval(() => {
+        if (stageIdx < stages.length) {
+            statusText.textContent = stages[stageIdx++];
+        }
+    }, 2500);
+
     // Hide previous results
     elements.resultsSection.style.display = 'none';
 
@@ -207,6 +225,7 @@ elements.validateBtn.addEventListener('click', async () => {
         const actualData = resultData.data;
         const result = validateCase(actualData, selectedCase.expectedDataLayer);
 
+        clearInterval(statusInterval);
         renderReport(result);
 
         elements.resultsSection.style.display = 'block';
@@ -216,6 +235,7 @@ elements.validateBtn.addEventListener('click', async () => {
         alert('Extraction failed: ' + error.message);
         console.error(error);
     } finally {
+        if (typeof statusInterval !== 'undefined') clearInterval(statusInterval);
         elements.validateBtn.innerHTML = 'RUN VALIDATION';
         elements.validateBtn.disabled = false;
         elements.loadingOverlay.style.display = 'none';
@@ -283,9 +303,11 @@ function renderReport(result) {
                 <div class="diff-path">${d.path || 'ROOT'}</div>
                 <div class="diff-comment">${d.comment}</div>
                 ${d.expected !== undefined ? `
-                    <div style="margin-top:0.5rem; font-size:0.85rem; color: var(--text-secondary);">
-                        <strong>Expected:</strong> <code>${JSON.stringify(d.expected)}</code><br/>
-                        <strong>Actual:</strong> <code>${JSON.stringify(d.actual)}</code>
+                    <div style="margin-top:0.75rem;">
+                        <h4 style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Expected Value</h4>
+                        <div class="json-block" style="font-size: 0.8rem; padding: 0.5rem; margin-bottom: 8px;">${JSON.stringify(d.expected)}</div>
+                        <h4 style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Actual Value</h4>
+                        <div class="json-block" style="font-size: 0.8rem; padding: 0.5rem; border-left: 3px solid var(--error);">${JSON.stringify(d.actual)}</div>
                     </div>
                 ` : ''}
             </div>`;
