@@ -11,6 +11,9 @@ app.use(express.json());
 // Serve the static frontend files
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Health check endpoint for Railway/Cloud platforms
+app.get('/health', (req, res) => res.status(200).send('OK'));
+
 /**
  * Maps the ref ID to an action that Puppeteer needs to execute
  * before grabbing the digitalData.
