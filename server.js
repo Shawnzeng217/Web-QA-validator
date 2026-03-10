@@ -77,54 +77,47 @@ app.post('/api/extract', async (req, res) => {
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
 
-        console.log(`Navigating to ${url}...`);
-        await page.goto(url, {
-            waitUntil: 'networkidle2',
-            timeout: 90000
+        // --- 1. SET UP NODE-BROWSER BRIDGE ---
+        let capturedData = null;
+        let resolveCapture;
+        const capturePromise = new Promise(resolve => { resolveCapture = resolve; });
+
+        // Expose a function to the browser to "push" data to Node
+        await page.exposeFunction('pushSnapshotToNode', (data) => {
+            if (data && data.click && data.click.clickID) {
+                console.log(`[Bridge] Received valid click snapshot: ${data.click.clickID}`);
+                capturedData = data;
+                resolveCapture();
+            }
         });
 
-        // 1. Inject Improved "Sticky" Snapshot Listener
         await page.evaluateOnNewDocument(() => {
-            window._digitalDataSnapshot = null;
-            // Listen to both mousedown and click to ensure we catch it whenever the app updates it
-            const capture = () => {
-                if (window.digitalData && window.digitalData.click && window.digitalData.click.clickID) {
-                    window._digitalDataSnapshot = JSON.parse(JSON.stringify(window.digitalData));
+            let lastClickID = "";
+            const check = () => {
+                const current = (window.digitalData && window.digitalData.click) ? window.digitalData.click.clickID : "";
+                if (current && current !== lastClickID) {
+                    lastClickID = current;
+                    // Push to Node instantly
+                    window.pushSnapshotToNode(JSON.parse(JSON.stringify(window.digitalData)));
                 }
             };
-            window.addEventListener('mousedown', capture, true);
-            window.addEventListener('click', capture, true);
-
-            // Periodically check during interaction
-            setInterval(capture, 100);
+            setInterval(check, 50);
+            window.addEventListener('mousedown', check, true);
+            window.addEventListener('click', check, true);
         });
 
-        // Re-inject for current session
-        await page.evaluate(() => {
-            window._digitalDataSnapshot = null;
-            const capture = () => {
-                if (window.digitalData && window.digitalData.click && window.digitalData.click.clickID) {
-                    window._digitalDataSnapshot = JSON.parse(JSON.stringify(window.digitalData));
-                }
-            };
-            window.addEventListener('mousedown', capture, true);
-            window.addEventListener('click', capture, true);
-        });
+        console.log(`Navigating to ${url}...`);
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 90000 });
 
-        // 2. Interaction Logic
+        // --- 2. INTERACTION LOGIC ---
         const isClickTest = expectedDataLayer && expectedDataLayer.includes('"click"');
 
         if (isClickTest && requirement) {
-            console.log(`[Puppeteer] Click requirement detected. Searching for visible element with text: "${requirement}"`);
+            console.log(`[Puppeteer] Click requirement detected: "${requirement}"`);
 
-            // Find coordinates/selector in JS context
             const elementInfo = await page.evaluate((text) => {
                 const elements = Array.from(document.querySelectorAll('a, button, span, div, li, p'));
-                const target = elements.find(el => {
-                    const elText = el.innerText || el.textContent || "";
-                    return elText.trim().toLowerCase().includes(text.toLowerCase());
-                });
-
+                const target = elements.find(el => (el.innerText || el.textContent || "").trim().toLowerCase().includes(text.toLowerCase()));
                 if (target) {
                     target.scrollIntoView({ block: 'center' });
                     const rect = target.getBoundingClientRect();
@@ -134,56 +127,43 @@ app.post('/api/extract', async (req, res) => {
             }, requirement);
 
             if (elementInfo.found) {
-                console.log(`[Puppeteer] Element found at (${elementInfo.x}, ${elementInfo.y}). Performing native click...`);
+                console.log(`[Puppeteer] Performing native click at (${elementInfo.x}, ${elementInfo.y})`);
 
-                // Use native mouse clicks which are more "trusted" by analytics frameworks
+                // Trigger the click and wait for the bridge to resolve OR timeout
                 await page.mouse.click(elementInfo.x, elementInfo.y);
 
-                console.log(`[Puppeteer] Clicked. Waiting for digitalData sequence to complete...`);
+                console.log(`[Puppeteer] Clicked. Waiting for Bridge callback...`);
+                // Wait up to 5 seconds for the bridge to receive the data
+                await Promise.race([
+                    capturePromise,
+                    new Promise(r => setTimeout(r, 5000))
+                ]);
 
-                // Smart Wait: Poll for clickID to appear in snapshot
-                let attempts = 0;
-                while (attempts < 20) {
-                    const hasData = await page.evaluate(() => {
-                        return window._digitalDataSnapshot &&
-                            window._digitalDataSnapshot.click &&
-                            window._digitalDataSnapshot.click.clickID !== "";
-                    });
-                    if (hasData) {
-                        console.log(`[Puppeteer] Success! Captured clickID in snapshot.`);
-                        break;
-                    }
-                    await new Promise(r => setTimeout(r, 200));
-                    attempts++;
-                }
-
-                if (attempts >= 20) {
-                    console.warn(`[Puppeteer] Timeout waiting for clickID. Reverting to current window state.`);
+                if (capturedData) {
+                    console.log(`[Puppeteer] Bridge successfully captured data.`);
+                } else {
+                    console.warn(`[Puppeteer] Bridge timeout. No click data received.`);
                 }
             } else {
-                console.warn(`[Puppeteer] Element text "${requirement}" NOT FOUND on page.`);
+                console.warn(`[Puppeteer] Element text "${requirement}" NOT FOUND.`);
             }
         } else if (ref) {
             await performActionForRef(page, ref);
             await new Promise(r => setTimeout(r, 1000));
         }
 
-        console.log(`Extracting final state...`);
-        const extractedData = await page.evaluate(() => {
-            // First try the snapshot (captured during click), then fall back to live window
-            const snap = window._digitalDataSnapshot;
-            if (snap && snap.click && snap.click.clickID) return snap;
-            return window.digitalData || null;
-        });
+        // --- 3. FINAL EXTRACTION ---
+        console.log(`Extracting final result...`);
+        const finalData = capturedData || await page.evaluate(() => window.digitalData || null);
 
         console.log(`Extraction complete.`);
         console.log(`======================================\n`);
 
-        if (!extractedData) {
+        if (!finalData) {
             return res.status(404).json({ error: 'digitalData not found.' });
         }
 
-        res.json({ data: extractedData });
+        res.json({ data: finalData });
 
     } catch (error) {
         console.error('Error during extraction:', error);
