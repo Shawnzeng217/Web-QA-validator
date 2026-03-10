@@ -181,7 +181,7 @@ elements.validateBtn.addEventListener('click', async () => {
     const rawUrl = elements.baseUrl.value.trim();
     if (!rawUrl || !selectedCase) return;
 
-    elements.validateBtn.innerHTML = 'Analyzing...';
+    elements.validateBtn.innerHTML = 'VALIDATING...';
     elements.validateBtn.disabled = true;
     elements.loadingOverlay.style.display = 'block';
 
@@ -216,7 +216,7 @@ elements.validateBtn.addEventListener('click', async () => {
         alert('Extraction failed: ' + error.message);
         console.error(error);
     } finally {
-        elements.validateBtn.innerHTML = 'Run Validation <span class="btn-glow"></span>';
+        elements.validateBtn.innerHTML = 'RUN VALIDATION';
         elements.validateBtn.disabled = false;
         elements.loadingOverlay.style.display = 'none';
     }
