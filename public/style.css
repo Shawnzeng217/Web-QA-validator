@@ -250,8 +250,8 @@ input[type="file"] {
     background: #1e293b;
     /* Using same dark background as comparison blocks */
     border-left: 4px solid var(--error);
-    color: var(--white);
-    /* Better contrast */
+    color: #e2e8f0;
+    /* Light gray for general text inside */
 }
 
 .diff-item.match {

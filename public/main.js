@@ -304,9 +304,9 @@ function renderReport(result) {
                 <div class="diff-comment">${d.comment}</div>
                 ${d.expected !== undefined ? `
                     <div style="margin-top:0.75rem;">
-                        <h4 style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Expected Value</h4>
+                        <h4 style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 4px;">Expected Value</h4>
                         <div class="json-block" style="font-size: 0.8rem; padding: 0.5rem; margin-bottom: 8px;">${JSON.stringify(d.expected)}</div>
-                        <h4 style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 4px;">Actual Value</h4>
+                        <h4 style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 4px;">Actual Value</h4>
                         <div class="json-block" style="font-size: 0.8rem; padding: 0.5rem; border-left: 3px solid var(--error);">${JSON.stringify(d.actual)}</div>
                     </div>
                 ` : ''}
