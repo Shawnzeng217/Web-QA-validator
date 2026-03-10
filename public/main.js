@@ -212,7 +212,10 @@ elements.validateBtn.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 url: rawUrl,
-                ref: selectedCase.ref
+                ref: selectedCase.ref,
+                requirement: selectedCase.requirement,
+                expectedDataLayer: selectedCase.expectedDataLayer,
+                location: selectedCase.location
             })
         });
 

@@ -54,7 +54,7 @@ async function performActionForRef(page, ref) {
 }
 
 app.post('/api/extract', async (req, res) => {
-    const { url, ref } = req.body;
+    const { url, ref, requirement, expectedDataLayer } = req.body;
 
     if (!url) {
         return res.status(400).json({ error: 'URL is required' });
@@ -64,6 +64,7 @@ app.post('/api/extract', async (req, res) => {
     try {
         console.log(`\n======================================`);
         console.log(`[Extraction Request] URL: ${url} | Ref: ${ref}`);
+        console.log(`Target Requirement: ${requirement}`);
         console.log(`Launching headless Chrome...`);
 
         browser = await puppeteer.launch({
@@ -72,49 +73,90 @@ app.post('/api/extract', async (req, res) => {
         });
 
         const page = await browser.newPage();
-
-        // Set higher timeouts for slow UAT site
         page.setDefaultNavigationTimeout(90000);
         page.setDefaultTimeout(90000);
 
-        // Anti-bot bypass (basic)
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
 
         console.log(`Navigating to ${url}...`);
         await page.goto(url, {
             waitUntil: 'networkidle2',
-            timeout: 90000 // Increased from 30s to 90s for slow UAT environments
+            timeout: 90000
         });
 
-        // Execute specific trigger logic based on the test case Ref
-        if (ref) {
+        // 1. Inject Snapshot Listener
+        // This script runs in the browser and captures digitalData on any click
+        await page.evaluateOnNewDocument(() => {
+            window._digitalDataSnapshot = null;
+            window.addEventListener('mousedown', (event) => {
+                // Instantly deep clone the digitalData at the moment of interaction
+                if (window.digitalData) {
+                    window._digitalDataSnapshot = JSON.parse(JSON.stringify(window.digitalData));
+                }
+            }, true);
+        });
+
+        // Re-inject if navigation happened or just to be safe for current page
+        await page.evaluate(() => {
+            window._digitalDataSnapshot = null;
+            window.addEventListener('mousedown', (event) => {
+                if (window.digitalData) {
+                    window._digitalDataSnapshot = JSON.parse(JSON.stringify(window.digitalData));
+                }
+            }, true);
+        });
+
+        // 2. Identify and perform click if it's a click-based check
+        const isClickTest = expectedDataLayer && expectedDataLayer.includes('"click"');
+
+        if (isClickTest && requirement) {
+            console.log(`[Puppeteer] Click detected in spec. Searching for element matching: "${requirement}"`);
+
+            // Search for element by text content
+            const clicked = await page.evaluate((text) => {
+                const elements = Array.from(document.querySelectorAll('a, button, span, div, li'));
+                const target = elements.find(el => el.textContent.trim().toLowerCase().includes(text.toLowerCase()));
+                if (target) {
+                    target.scrollIntoView();
+                    target.click();
+                    return true;
+                }
+                return false;
+            }, requirement);
+
+            if (clicked) {
+                console.log(`[Puppeteer] Element clicked. Waiting for snapshot...`);
+                // Wait briefly for the snapshot to be captured before page might unload
+                await new Promise(r => setTimeout(r, 1500));
+            } else {
+                console.warn(`[Puppeteer] Could not find element matching text: "${requirement}"`);
+            }
+        } else if (ref) {
+            // Fallback for non-click tests or legacy ref-based logic
             await performActionForRef(page, ref);
+            await new Promise(r => setTimeout(r, 1000));
         }
 
-        // Wait a bit for analytics scripts to build the digitalData object
-        await new Promise(r => setTimeout(r, 1000));
-
-        console.log(`Extracting window.digitalData...`);
-        const digitalData = await page.evaluate(() => {
-            return window.digitalData || null;
+        console.log(`Extracting data...`);
+        const extractedData = await page.evaluate(() => {
+            // Priority: Transient click snapshot > current window.digitalData
+            return window._digitalDataSnapshot || window.digitalData || null;
         });
 
         console.log(`Extraction complete.`);
         console.log(`======================================\n`);
 
-        if (!digitalData) {
-            return res.status(404).json({ error: 'digitalData object not found on the window object.' });
+        if (!extractedData) {
+            return res.status(404).json({ error: 'digitalData not found. Page might have failed to load or objective element not found.' });
         }
 
-        res.json({ data: digitalData });
+        res.json({ data: extractedData });
 
     } catch (error) {
         console.error('Error during extraction:', error);
         res.status(500).json({ error: error.message || 'Failed to extract data' });
     } finally {
-        if (browser) {
-            await browser.close();
-        }
+        if (browser) await browser.close();
     }
 });
 
