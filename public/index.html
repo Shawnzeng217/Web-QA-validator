@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web QA Inspector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fira+Code&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="./style.css" />
+</head>
+
+<body>
+    <div class="bg-shape shape-1"></div>
+    <div class="bg-shape shape-2"></div>
+
+    <div class="container">
+        <header>
+            <h1>QA Inspector <span>Pro</span></h1>
+            <p>Automated Digital Data Layer Validation</p>
+        </header>
+
+        <main class="glass-panel">
+            <div class="step-container">
+                <div class="step">
+                    <div class="step-header">
+                        <div class="step-num">1</div>
+                        <h2>Load Spec (CSV)</h2>
+                    </div>
+                    <div class="step-content">
+                        <label for="csv-upload" class="file-upload-btn">
+                            <span id="csv-filename">Choose lls_qa.csv</span>
+                            <input type="file" id="csv-upload" accept=".csv" />
+                        </label>
+                    </div>
+                </div>
+
+                <div class="step" id="step-2" style="opacity: 0.5; pointer-events: none;">
+                    <div class="step-header">
+                        <div class="step-num">2</div>
+                        <h2>Select Target</h2>
+                    </div>
+                    <div class="step-content">
+                        <select id="ref-select" class="premium-input">
+                            <option value="">-- Select Requirement Base --</option>
+                        </select>
+                        <div id="req-preview" class="req-preview" style="display: none;"></div>
+                    </div>
+                </div>
+
+                <div class="step" id="step-3" style="opacity: 0.5; pointer-events: none;">
+                    <div class="step-header">
+                        <div class="step-num">3</div>
+                        <h2>Execution Settings</h2>
+                    </div>
+                    <div class="step-content">
+                        <label for="base-url"
+                            style="display:block; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">Target
+                            Environment URL (e.g. UAT or PROD)</label>
+                        <input type="url" id="base-url" class="premium-input"
+                            placeholder="https://lls-uat.hilton.com.cn/zh-cn/"
+                            value="https://lls-uat.hilton.com.cn/zh-cn/" />
+
+                        <div id="loading-overlay" class="loading-overlay"
+                            style="display: none; margin-top: 1rem; color: var(--accent-1); font-weight: 500;">
+                            <div class="spinner"></div> <!-- Custom spinner CSS needed -->
+                            <p>🤖 Puppeteer is running... Extracting digitalData...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-container">
+                <button id="validate-btn" class="primary-btn" disabled>
+                    Run Validation
+                    <span class="btn-glow"></span>
+                </button>
+            </div>
+        </main>
+
+        <section id="results-section" class="results-panel glass-panel" style="display: none;">
+            <div class="results-header">
+                <h2>Analysis Report</h2>
+                <div id="status-badge" class="badge">PENDING</div>
+            </div>
+
+            <div id="results-content" class="results-content">
+                <!-- Validation result will be injected here -->
+            </div>
+        </section>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="./main.js"></script>
+</body>
+
+</html>

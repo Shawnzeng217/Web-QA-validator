@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+*.csv
+debug_*.json
+FINAL_REPORT.md
+start.bat
