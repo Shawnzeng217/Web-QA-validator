@@ -69,7 +69,12 @@ app.post('/api/extract', async (req, res) => {
 
         browser = await puppeteer.launch({
             headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
         });
 
         const page = await browser.newPage();
@@ -178,8 +183,9 @@ app.post('/api/extract', async (req, res) => {
 
         console.log(`Navigating to ${url}...`);
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 90000 });
-        // Give analytics time to fully load and process
-        await new Promise(r => setTimeout(r, 4000));
+        // HEURISTIC: Railway latency to Hilton China UAT is higher. Wait longer for analytics.
+        console.log(`[Puppeteer] Waiting 8s for analytics to stabilize (Cloud Latency)...`);
+        await new Promise(r => setTimeout(r, 8000));
 
         // --- 2. INTERACTION LOGIC ---
         const isClickTest = expectedDataLayer && expectedDataLayer.includes('"click"');
