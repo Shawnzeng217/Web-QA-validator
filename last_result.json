@@ -1,0 +1,26 @@
+{
+  "data": {
+    "global": {
+      "page": {
+        "language": "zh-CN",
+        "brandCode": "HI",
+        "primaryCategory": "Home",
+        "pageType": "Home",
+        "siteName": "HiltonChina",
+        "version": "index",
+        "attributes": {}
+      },
+      "property": {
+        "propertyCode": "",
+        "attributes": {}
+      }
+    },
+    "click": {
+      "clickID": "Home > btn_Honors benefit"
+    },
+    "event": [],
+    "component": [],
+    "user": [],
+    "product": []
+  }
+}

@@ -1,5 +1,6 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
+const fs = require('fs');
 const cors = require('cors');
 const path = require('path');
 
@@ -84,41 +85,46 @@ app.post('/api/extract', async (req, res) => {
 
         // Expose a function to the browser to "push" data to Node
         await page.exposeFunction('pushSnapshotToNode', (data, source) => {
-            // If we already captured a full click snapshot, don't overwrite with a partial one
-            if (capturedData && capturedData.click && capturedData.click.clickID) return;
-
+            // Priority 1: A snap with a valid clickID
             if (data && data.click && data.click.clickID) {
-                console.log(`[Bridge] Received valid click snapshot from ${source}: ${data.click.clickID}`);
+                console.log(`[Bridge] Valid click captured from ${source}: ${data.click.clickID}`);
                 capturedData = data;
-                resolveCapture();
-            } else if (data) {
-                // Keep the most recent data as a fallback
+                resolveCapture(); // Resolve the promise immediately
+                return;
+            }
+
+            // Priority 2: Any data is better than null
+            if (!capturedData || !capturedData.click || !capturedData.click.clickID) {
                 capturedData = data;
             }
         });
 
         await page.evaluateOnNewDocument(() => {
             window._lastClickID = "";
-
             const doCapture = (source) => {
                 if (window.digitalData) {
-                    const snap = JSON.parse(JSON.stringify(window.digitalData));
-                    window.pushSnapshotToNode(snap, source);
+                    try {
+                        const snap = JSON.parse(JSON.stringify(window.digitalData));
+                        window.pushSnapshotToNode(snap, source);
+                    } catch (e) { }
                 }
             };
 
-            // Global interception
-            window.addEventListener('mousedown', () => doCapture('mousedown'), true);
-            window.addEventListener('click', () => doCapture('click'), true);
+            // Intercept at bubble phase (false) to run AFTER most site listeners
+            window.addEventListener('mousedown', () => doCapture('mousedown_bubble'), false);
+            window.addEventListener('click', () => doCapture('click_bubble'), false);
 
-            // Watcher for lazy-loaded analytics IDs
+            // Force capture before navigation
+            window.addEventListener('beforeunload', () => doCapture('unload'), false);
+
+            // Faster watcher for transient changes
             setInterval(() => {
                 const currentID = (window.digitalData && window.digitalData.click) ? window.digitalData.click.clickID : "";
                 if (currentID && currentID !== window._lastClickID) {
                     window._lastClickID = currentID;
-                    doCapture('watcher');
+                    doCapture('watcher_fast');
                 }
-            }, 50);
+            }, 20);
         });
 
         console.log(`Navigating to ${url}...`);
@@ -188,12 +194,19 @@ app.post('/api/extract', async (req, res) => {
             : await page.evaluate(() => window.digitalData || null);
 
         console.log(`Extraction complete.`);
+        console.log("FINAL_JSON_TO_SEND_START");
+        console.log(JSON.stringify(finalData));
+        console.log("FINAL_JSON_TO_SEND_END");
         console.log(`======================================\n`);
 
         if (!finalData) {
             return res.status(404).json({ error: 'digitalData not found.' });
         }
 
+        if (finalData) {
+            fs.writeFileSync('last_result.json', JSON.stringify({ data: finalData }, null, 2));
+            console.log(`[Server] Saved result to last_result.json`);
+        }
         res.json({ data: finalData });
 
     } catch (error) {
