@@ -336,7 +336,7 @@ function renderReport(result) {
     
     <div style="margin-top: 1.5rem;">
         <h4 style="color: var(--text-secondary); margin-bottom: 0.5rem; font-size: 0.9rem;">Full Actual Code Context (DigitalData)</h4>
-        <div class="json-block" style="max-height: 400px; overflow-y: auto;">${renderJsonWithHighlights(result.actual, errorPaths)}</div>
+        <div class="json-block">${renderJsonWithHighlights(result.actual, errorPaths)}</div>
     </div>`;
 
     elements.resultsContent.innerHTML = html;
