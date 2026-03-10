@@ -77,33 +77,48 @@ app.post('/api/extract', async (req, res) => {
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
 
-        // --- 1. SET UP NODE-BROWSER BRIDGE ---
+        // --- 1. SET UP NODE-BROWSER BRIDGE (Hard Capture) ---
         let capturedData = null;
         let resolveCapture;
         const capturePromise = new Promise(resolve => { resolveCapture = resolve; });
 
         // Expose a function to the browser to "push" data to Node
-        await page.exposeFunction('pushSnapshotToNode', (data) => {
+        await page.exposeFunction('pushSnapshotToNode', (data, source) => {
+            // If we already captured a full click snapshot, don't overwrite with a partial one
+            if (capturedData && capturedData.click && capturedData.click.clickID) return;
+
             if (data && data.click && data.click.clickID) {
-                console.log(`[Bridge] Received valid click snapshot: ${data.click.clickID}`);
+                console.log(`[Bridge] Received valid click snapshot from ${source}: ${data.click.clickID}`);
                 capturedData = data;
                 resolveCapture();
+            } else if (data) {
+                // Keep the most recent data as a fallback
+                capturedData = data;
             }
         });
 
         await page.evaluateOnNewDocument(() => {
-            let lastClickID = "";
-            const check = () => {
-                const current = (window.digitalData && window.digitalData.click) ? window.digitalData.click.clickID : "";
-                if (current && current !== lastClickID) {
-                    lastClickID = current;
-                    // Push to Node instantly
-                    window.pushSnapshotToNode(JSON.parse(JSON.stringify(window.digitalData)));
+            window._lastClickID = "";
+
+            const doCapture = (source) => {
+                if (window.digitalData) {
+                    const snap = JSON.parse(JSON.stringify(window.digitalData));
+                    window.pushSnapshotToNode(snap, source);
                 }
             };
-            setInterval(check, 50);
-            window.addEventListener('mousedown', check, true);
-            window.addEventListener('click', check, true);
+
+            // Global interception
+            window.addEventListener('mousedown', () => doCapture('mousedown'), true);
+            window.addEventListener('click', () => doCapture('click'), true);
+
+            // Watcher for lazy-loaded analytics IDs
+            setInterval(() => {
+                const currentID = (window.digitalData && window.digitalData.click) ? window.digitalData.click.clickID : "";
+                if (currentID && currentID !== window._lastClickID) {
+                    window._lastClickID = currentID;
+                    doCapture('watcher');
+                }
+            }, 50);
         });
 
         console.log(`Navigating to ${url}...`);
@@ -113,39 +128,53 @@ app.post('/api/extract', async (req, res) => {
         const isClickTest = expectedDataLayer && expectedDataLayer.includes('"click"');
 
         if (isClickTest && requirement) {
-            console.log(`[Puppeteer] Click requirement detected: "${requirement}"`);
+            console.log(`[Puppeteer] Target Requirement: "${requirement}"`);
 
             const elementInfo = await page.evaluate((text) => {
-                const elements = Array.from(document.querySelectorAll('a, button, span, div, li, p'));
-                const target = elements.find(el => (el.innerText || el.textContent || "").trim().toLowerCase().includes(text.toLowerCase()));
+                const elements = Array.from(document.querySelectorAll('a, button, span, div, li, p, h1, h2, h3, h4, i'));
+                // Extremely aggressive search for Ref 5 / Honors Benefits area
+                const targets = elements.filter(el => {
+                    const elText = (el.innerText || el.textContent || "").trim();
+                    return elText.includes(text) ||
+                        elText.includes("详细权益") ||
+                        elText.includes("更多权益") ||
+                        elText.includes("Detailed Benefit") ||
+                        elText.includes("查看更多") ||
+                        elText.includes("Benefit");
+                });
+
+                // Pick the most likely clickable target (usually an A or Button)
+                const target = targets.find(el => el.tagName === 'A' || el.tagName === 'BUTTON') || targets[0];
+
                 if (target) {
                     target.scrollIntoView({ block: 'center' });
                     const rect = target.getBoundingClientRect();
-                    return { found: true, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+                    return { found: true, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, tagName: target.tagName, text: target.innerText };
                 }
                 return { found: false };
             }, requirement);
 
             if (elementInfo.found) {
-                console.log(`[Puppeteer] Performing native click at (${elementInfo.x}, ${elementInfo.y})`);
+                console.log(`[Puppeteer] Found ${elementInfo.tagName} "${elementInfo.text}". Clicking...`);
 
-                // Trigger the click and wait for the bridge to resolve OR timeout
+                // Perform hardware-level click
                 await page.mouse.click(elementInfo.x, elementInfo.y);
 
                 console.log(`[Puppeteer] Clicked. Waiting for Bridge callback...`);
-                // Wait up to 5 seconds for the bridge to receive the data
+                // Wait up to 6 seconds for the bridge to receive the data
                 await Promise.race([
                     capturePromise,
-                    new Promise(r => setTimeout(r, 5000))
+                    new Promise(r => setTimeout(r, 6000))
                 ]);
 
-                if (capturedData) {
-                    console.log(`[Puppeteer] Bridge successfully captured data.`);
+                if (capturedData && capturedData.click && capturedData.click.clickID) {
+                    console.log(`CRITICAL_DEBUG_BRIDGE_SUCCESS: Captured clickID = ${capturedData.click.clickID}`);
                 } else {
-                    console.warn(`[Puppeteer] Bridge timeout. No click data received.`);
+                    console.warn(`CRITICAL_DEBUG_BRIDGE_FAIL: Snapshot is empty or missing clickID.`);
+                    console.log("CRITICAL_DEBUG_SNAPSHOT_STATE:", JSON.stringify(capturedData));
                 }
             } else {
-                console.warn(`[Puppeteer] Element text "${requirement}" NOT FOUND.`);
+                console.warn(`[Puppeteer] Element text "${requirement}" NOT FOUND on page.`);
             }
         } else if (ref) {
             await performActionForRef(page, ref);
@@ -154,7 +183,9 @@ app.post('/api/extract', async (req, res) => {
 
         // --- 3. FINAL EXTRACTION ---
         console.log(`Extracting final result...`);
-        const finalData = capturedData || await page.evaluate(() => window.digitalData || null);
+        const finalData = (capturedData && capturedData.click && capturedData.click.clickID)
+            ? capturedData
+            : await page.evaluate(() => window.digitalData || null);
 
         console.log(`Extraction complete.`);
         console.log(`======================================\n`);
